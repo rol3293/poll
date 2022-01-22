@@ -65,7 +65,6 @@ contract Poll {
     }
 
     function getWinner() public restricted {
-        pause(true);
         closed = true;
 
         uint winnerIndex = 0;
@@ -90,13 +89,14 @@ contract Poll {
         return votes;
     }
 
-    function getSummary() external view returns(bool, bool, uint, string memory, string memory, string[] memory,uint[] memory) {
+    function getSummary() external view returns(address, string memory, string memory, bool, bool, uint, string[] memory, uint[] memory) {
         return (
+            manager,
+            title,
+            description,
             paused,
             closed,
             winner,
-            title,
-            description,
             getOptions(),
             getVotes()
         );
