@@ -2,11 +2,8 @@ import React from "react";
 import Layout from "../components/Layout";
 import factory from "../ethereum/factory";
 import Poll from "../ethereum/poll";
-import {Card, Loader} from "semantic-ui-react";
+import { Card, Loader } from "semantic-ui-react";
 import web3 from "../ethereum/web3";
-import {EventEmitter} from "events";
-
-const ethEvent = new EventEmitter();
 
 class Index extends React.Component {
     state = {
@@ -20,26 +17,33 @@ class Index extends React.Component {
         const items = [];
         for (const e of polls) {
             const poll = Poll(e);
-            const options = await poll.methods.getOptions().call();
-            const votes = await poll.methods.getVotes().call();
+            const summary = await poll.methods.getSummary().call();
+            const title = summary[1];
+            const description = summary[2];
+            const paused = summary[3];
+            const closed = summary[4];
+            const winner = summary[5];
+            const options = summary[6];
+            const votes = summary[7];
             let totalVotes = 0;
-            votes.forEach(e => {
-                totalVotes += e/1;
+            votes.map((value, index) => {
+                totalVotes += parseInt(value);
             });
             items.push(
                 {
                     href: `/vote/${e}`,
-                    header: await poll.methods.description().call(),
+                    header: title,
                     description: `Options: ${[...options]}`,
-                    meta: 'total votes: ' + totalVotes
+                    meta: 'total votes: ' + totalVotes,
+                    color: paused ? 'red' : 'blue'
                 }
             );
         }
-        this.setState({items, loading: false});
+        this.setState({ items, loading: false });
     }
 
     render() {
-        const {items, loading} = this.state;
+        const { items, loading } = this.state;
         return (
             <Layout>
                 <h2>
@@ -54,10 +58,6 @@ class Index extends React.Component {
                 <Card.Group items={items} />
             </Layout>
         );
-    }
-
-    componentWillUnmount() {
-        ethEvent.removeAllListeners();
     }
 }
 
