@@ -3,97 +3,129 @@ import Layout from "../../components/Layout";
 import web3 from "../../ethereum/web3";
 import factory from "../../ethereum/factory";
 import Poll from "../../ethereum/poll";
-import {Button, Form, Message, Radio} from "semantic-ui-react";
+import { Button, Form, Message, Radio } from "semantic-ui-react";
 
 class VoteIndex extends React.Component {
     state = {
-        value: '0',
+        value: 0,
         loading: false,
         error: '',
         alreadyVoted: false,
         userIsOwner: false,
-        isPaused: false
+        title: '',
+        description: '',
+        votes: [],
+        options: [],
+        manager: '',
+        paused: false,
+        closed: false,
+        winner: -1
     }
 
-    static async getInitialProps({query}) {
-        const poll = Poll(query['address']);
-        const votes = await poll.methods.getVotes().call();
-
-        return {query, votes};
+    static async getInitialProps({ query }) {
+        return { query };
     }
 
-    async getUserInfo() {
-        const poll = Poll(this.props.query['address']);
-
+    async getPollInfo(poll) {
         const [account] = await web3.eth.getAccounts();
 
         const alreadyVoted = await poll.methods.voted(account).call();
-        const userIsOwner = await poll.methods.manager().call() === account;
-        const isPaused = await poll.methods.closed().call();
-
-        this.setState({alreadyVoted, userIsOwner, isPaused});
+        const summary = await poll.methods.getSummary().call();
+        const manager = summary[0];
+        const title = summary[1];
+        const description = summary[2];
+        const paused = summary[3];
+        const closed = summary[4];
+        const winner = summary[5];
+        const options = summary[6];
+        const votes = summary[7];
+        const userIsOwner = manager === account;
+        this.setState({ alreadyVoted, userIsOwner, manager, title, description, paused, closed, winner, options, votes });
     }
 
     async componentDidMount() {
+        // get data about the poll
+        const poll = Poll(this.props.query['address']);
         window.ethereum.on('accountsChanged', async () => {
-            await this.getUserInfo();
+            await this.getPollInfo(poll);
         });
-        await this.getUserInfo();
+        await this.getPollInfo(poll);
+
+        // listener for vote
+        poll.events.VoteEvent().on('data', (event) => {
+            const { option, newValue } = event.returnValues;
+            let votes = [...this.state.votes];
+            votes[parseInt(option)] = newValue;
+            this.setState({ votes });
+        });
+
+        // listener for pause
+        poll.events.PauseEvent().on('data', (event) => {
+            const { newState } = event.returnValues;
+            this.setState({ paused: newState });
+        });
+
+        // listener for when a winner selected
+        poll.events.GetWinnerEvent().on('data', (event) => {
+            const { winner } = event.returnValues;
+            this.setState({ winner, closed: true });
+        });
     }
 
     onVote = async () => {
-        this.setState({loading: true, error: ''});
+        this.setState({ loading: true, error: '' });
 
         let accounts = await web3.eth.getAccounts();
 
         const verified = await factory.methods.voters(accounts[0]).call();
         if (!verified) {
-            this.setState({error: 'This address is not verified', loading: false});
+            this.setState({ error: 'This address is not verified', loading: false });
             return;
         }
 
-        this.setState({loading: true});
+        this.setState({ loading: true });
         const poll = Poll(this.props.query['address']);
         try {
-            await poll.methods.vote(this.state.value * 1).send({from: accounts[0]});
-            this.setState({alreadyVoted: true});
+            await poll.methods.vote(this.state.value).send({ from: accounts[0] });
+            this.setState({ alreadyVoted: true });
         } catch (err) {
-            this.setState({error: err.message});
+            this.setState({ error: err.message });
         }
-        this.setState({loading: false});
+        this.setState({ loading: false });
     }
 
     continuePoll = async () => {
         const [account] = await web3.eth.getAccounts();
         const poll = Poll(this.props.query['address']);
-        await poll.methods.stop(true).send({from: account});
+        await poll.methods.pause(true).send({ from: account });
     }
 
     pausePoll = async () => {
         const [account] = await web3.eth.getAccounts();
         const poll = Poll(this.props.query['address']);
-        await poll.methods.stop(false).send({from: account});
+        await poll.methods.pause(false).send({ from: account });
     }
 
     pickWinner = async () => {
         const [account] = await web3.eth.getAccounts();
         const poll = Poll(this.props.query['address']);
-        this.setState({loading: true, error: ''});
+        this.setState({ loading: true, error: '' });
         try {
-            await poll.methods.getWinner().send({from: account});
+            await poll.methods.getWinner().send({ from: account });
         } catch (err) {
-            this.setState({error: err.message});
+            this.setState({ error: err.message });
         }
-        this.setState({loading: false});
+        this.setState({ loading: false });
     }
 
     render() {
-        const {query, votes} = this.props;
-        const {loading, alreadyVoted, error, userIsOwner, isPaused} = this.state;
+        const { query } = this.props;
+        const { loading, error, alreadyVoted, userIsOwner, manager, paused, closed, options, votes, winner, title, description } = this.state;
 
         return (
             <Layout>
-                <h2>Vote</h2>
+                <h2>{title}</h2>
+                <p>{description}</p>
                 <div>
                     Address:
                     <a
@@ -101,41 +133,42 @@ class VoteIndex extends React.Component {
                         target="_blank"
                     >{" " + query['address']}</a>
                 </div>
-                <br/>
+                <div>
+                    Owner:
+                    <a
+                        href={`https://rinkeby.etherscan.io/address/${manager}`}
+                        target="_blank"
+                    >{" " + manager}</a>
+                </div>
+                <br />
                 <Form>
-                    <Form.Field>
-                        <Radio
-                            label={'Yes (' + votes[0] + ')'}
-                            name='radioGroup'
-                            value='0'
-                            checked={this.state.value === '0'}
-                            onChange={() => this.setState({value: '0'})}
-                        />
-                    </Form.Field>
-                    <Form.Field>
-                        <Radio
-                            label={'No (' + votes[1] + ')'}
-                            name='radioGroup'
-                            value='1'
-                            checked={this.state.value === '1'}
-                            onChange={() => this.setState({value: '1'})}
-                        />
-                    </Form.Field>
+                    {options.map((option, index) => (
+                        <Form.Field>
+                            <Radio
+                                disabled={paused}
+                                label={option + ' (' + votes[index] + ')'}
+                                name='radioGroup'
+                                value={index}
+                                checked={this.state.value === index}
+                                onChange={() => this.setState({ value: index })}
+                            />
+                        </Form.Field>
+                    ))}
                 </Form>
                 <Button
                     primary
                     loading={loading}
-                    disabled={alreadyVoted || isPaused || loading}
+                    disabled={alreadyVoted || paused || loading}
                     onClick={this.onVote}
-                    style={{marginTop: '10px'}}>{alreadyVoted ? 'Already voted' : 'Vote'}</Button>
-                {userIsOwner &&
+                    style={{ marginTop: '10px' }}>{alreadyVoted ? 'Already voted' : 'Vote'}</Button>
+                {(userIsOwner && !closed) &&
                     <span>
                         <Button
                             disabled={loading}
                             loading={loading}
                             color='red'
-                            onClick={!isPaused ? this.continuePoll : this.pausePoll}
-                        >{isPaused ? 'Reopen' : 'Pause'}</Button>
+                            onClick={!paused ? this.continuePoll : this.pausePoll}
+                        >{paused ? 'Reopen' : 'Pause'}</Button>
                         <Button
                             disabled={loading}
                             loading={loading}
@@ -144,8 +177,9 @@ class VoteIndex extends React.Component {
                         >Pick winner</Button>
                     </span>
                 }
-                <Message negative content='This poll is currently closed' hidden={!isPaused}/>
-                <Message negative content={error} hidden={!error}/>
+                <Message positive content={`The winner is ${options[winner]}`} hidden={!closed}/>
+                <Message negative content='This poll is currently closed' hidden={(false && true)} />
+                <Message negative content={error} hidden={!error} />
             </Layout>
         );
     }
